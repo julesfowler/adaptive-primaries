@@ -28,6 +28,9 @@ class Wiggle:
 
         self._calculate_influence_functions()
 
+    def some_math(self):
+         
+        # MATH MATH MATH
 
     def build_science_detector(self):
 
