@@ -1,6 +1,6 @@
 WIGGLE
 ------
-Wavefront Improvements with GiGantic refLEctors
+Wavefront Improvements with GiGantic Light-deforming Experiments 
 
 AKA ... adaptive primaries!
 
