@@ -31,12 +31,13 @@ class Wiggle:
         
 
 
-        # Overwriting site parameters 
+        # Overwriting/calculating site parameters 
         self.coherence_cell_size = coherence_cell_size if coherence_cell_size is not None
         self.mean_wind_speed = mean_wind_speed if mean_wind_speed is not None 
         self.cn_squared = cn_squared if cn_squared is not None
         self.r0_scalar = r0_scalar if r0_scalar is not None
-        
+        self.structure_function = self._calculate_structure_function()
+
         # AO system parameters
         self.telescope_diameter = telescope_diameter # in meters
         self.science_field = science_field # in arcsec
@@ -72,17 +73,23 @@ class Wiggle:
 
         self._calculate_influence_functions()
     
-    def _calculate_diffraction_limit():
+
+    def _calculate_structure_function(self):
+        """ Calculates the structure function for a given site."""
+
+        self.structure_function = self.cn_squared*(self.r_0**(2/3))
+
+    def _calculate_diffraction_limit(self)):
         """ Calculates diffraction limit. """
 
         pass
     
-    def _calculate_actuators_across():
+    def _calculate_actuators_across(self):
         """ Calculates actuators across the diameter. I.e., 'unit actuators'. """
 
         self.unit_actuators = self.telescope_diameter / self.actuator_spacing
 
-    def _calculate_spatial_frequency_cutoff():
+    def _calculate_spatial_frequency_cutoff(self):
         """ Calculates the highest spatial freq (smallest size) that's controllable. """
 
         self.spatial_cutoff = ( self.unit_actuators / self.telescope_diameter)/2 
