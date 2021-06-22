@@ -2,7 +2,23 @@ import numpy as np
 
 
 """ This is the Wiggle class. It houses simulations of AO loops
-with adaptive primaries. Go team."""
+with adaptive primaries. Go team.
+
+
+EASTER EGGGGGGGGGS
+------------------
+- cn_squared is a vertical turbulence profile
+-- we need it to calculate the structure function
+-- we don't know how or why quite yet oops
+
+- coherence cell size vs r0_scalar
+-- this are the same
+- NO LASER GUIDESTARS
+-- NO TIPTILT ERRORS
+-- NO ANISOPLANETISM 
+- NO SHIRT NO SHOES NO LASER GUIDE STARS
+
+"""
 
 
 class Wiggle:
@@ -10,42 +26,69 @@ class Wiggle:
     Parameters 
     ----------
     site : str
-
-    diameter : 
-    seeing : 
-
+        Key for the site if a prebuilt set of conditions.
+    telescope_diameter : float
+        Diameter of the primary mirror in meters.
+    science_wavelength : float
+        Wavelength at which we do our ssscience in nanometers.
+    coherence_cell_size : float
+        Turbulence pocket scale length -- i.e. r0 NOT dependent 
+        on zenith angle in meters.
+    zenith_angle : float
+        Angle at which we're observing -- assumed to be zero in degrees. 
+    mean_wind_speed : float
+        Mean speed of the wind in meters/s.
+    controller_frequency : float
+        Frequency at which the controller (i.e. AO system) can operate in Hz.
+    cn_squared : is rude  
+        Vertical turbulence profile. #FIXME
+    science_field : float #FIXME unused
+        Size of science field in arcseconds
+    number_actuators : int
+        Number of actuators on the adaptive mirror. 
+    readnoise : float
+        Readnoise of the wavefront sensor in electrons/pix.
+    fitting_parameter : float # FIXME
+        WHO IS SHE. (Between 0-1 -- set with ext reference from Hardy.)
+    guide_star_mag : float
+        Magnitude of star in band of WFS. 
+    aperture : str #FIXME
+        Sets propagator term something something equation something somethign
+        WFS. Noll, JOSA 68, 1978
+    dm : str
+        Whether the DM is primary, secondary, or post focal plane.
+    
     """
 
-    def __init__(self, site=None, telescope_diameter=8, science_field=30, 
-                 actuator_spacing=0.3, readnoise=1, controller_frequency=30,
-                 wavelength=100, zenith_angle=5, fitting_parameter=0.3, 
-                 guide_star_mag=4, dm='primary', aperture='square', 
-                 coherence_cell_size = 0.1, mean_wind_speed = 10, 
-                 cn_squared = 0.1, r0_scalar = 0.1):      
 
+    def __init__(self, site=None, telescope_diameter=8, science_wavelength=1000, 
+                 coherence_cell_size=0.1, zenith_angle=0, mean_wind_speed = 10,
+                 controller_frequency=50, cn_squared=1, science_field=30, 
+                 number_actuators=559, readnoise=1, fitting_parameter=0.18, 
+                 guide_star_mag=4, aperture='square', dm='primary'):
+        
+        self.parameter_wavlength = 500 # DON'T CHANGE MEEEEEE
         # Site population
         sites = {'hamilton': {'r0': 10}}            
         if site is not None:
             self.site = site
-            self.coherence_cell_size = sites[site]['coherence_cell_size']
-            self.mean_wind_speed = sites[site]['mean_wind_speed']
-            self.cn_squared = sites[site]['cn_squared']
-            self.r0_scalar = sites[site]['r0_scalar']
+            self.coherence_cell_size = sites[site]['coherence_cell_size'] # in meters
+            self.mean_wind_speed = sites[site]['mean_wind_speed'] # m/s
+            self.cn_squared = sites[site]['cn_squared'] # 
         
 
         # Overwriting/calculating site parameters -- FIXME
         self.coherence_cell_size = coherence_cell_size
         self.mean_wind_speed = mean_wind_speed # meters/2
         self.cn_squared = cn_squared
-        self.r0_scalar = r0_scalar
 
         # AO system parameters
         self.telescope_diameter = telescope_diameter # in meters
         self.science_field = science_field # in arcsec
-        self.actuator_spacing = actuator_spacing # in meters 
+        self.number_actuators = number_actuators # actuators
         self.sigma_readnoise = readnoise # in photons/pix
         self.controller_frequency = controller_frequency
-        self.wavelength = wavelength 
+        self.wavelength = science_wavelength # nanometers
         self.dm=dm
         self.aperture=aperture
         
@@ -80,7 +123,6 @@ class Wiggle:
 
     def _calculate_structure_function(self):
         """ Calculates the structure function for a given site."""
-
         self.structure_function = self.cn_squared*(self.r0**(2/3))
 
     def _calculate_diffraction_limit(self):
@@ -90,7 +132,9 @@ class Wiggle:
     
     def _calculate_actuators_across(self):
         """ Calculates actuators across the diameter. I.e., 'unit actuators'. """
-
+        
+        # spherical mirrors only
+        self.actuator_spacing =(self.telescope_diameter/2)**2*np.pi/self.number_actuators 
         self.unit_actuators = self.telescope_diameter / self.actuator_spacing
 
     def _calculate_spatial_frequency_cutoff(self):
@@ -101,7 +145,7 @@ class Wiggle:
     def _calculate_r0(self):
         """ Calcualtes r0 at the zenith angle. """
 
-        self.r0 = self.r0_scalar * (np.cos(self.zenith_angle))**(3/5)
+        self.r0 = self.coherence_cell_size * (np.cos(self.zenith_angle))**(3/5)
 
     def _calculate_greenwood_frequency(self):
         """ Calculates greendwood frequency for a site/target."""
@@ -203,11 +247,11 @@ class Wiggle:
 
 #actuators vs diameter:
 
-
-test = Wiggle(site=None, telescope_diameter=8, science_field=30,
+if __name__ == "__main__":
+    test = Wiggle(site=None, telescope_diameter=8, science_field=30,
         actuator_spacing=0.3, readnoise=.01, controller_frequency=30, 
         dm='primary', aperture='square', coherence_cell_size = 1,
         mean_wind_speed = 3, cn_squared = .5, r0_scalar = .02)
         
-print(test.strehl)
+    print(test.strehl)
 
