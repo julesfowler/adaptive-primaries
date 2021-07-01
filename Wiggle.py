@@ -36,6 +36,11 @@ class Wiggle:
         on zenith angle in meters.
     zenith_angle : float
         Angle at which we're observing -- assumed to be zero in degrees. 
+    isoplanatic_angle : float
+        Max separation while moving through the same turbulence pocket in
+        arcseconds. 
+    science_object_separation : float
+        Separation between science object and guidestar in arcseconds.
     mean_wind_speed : float
         Mean speed of the wind in meters/s.
     controller_frequency : float
@@ -62,12 +67,13 @@ class Wiggle:
 
 
     def __init__(self, site=None, telescope_diameter=8, science_wavelength=1000, 
-                 coherence_cell_size=0.1, zenith_angle=0, mean_wind_speed = 10,
+                 coherence_cell_size=0.1, zenith_angle=0, isoplanatic_angle=3.87,
+                 science_object_separation=0, mean_wind_speed = 10,
                  controller_frequency=50, cn_squared=1, science_field=30, 
-                 number_actuators=559, readnoise=1, fitting_parameter=0.18, 
+                 actuator_spacing=0.3, readnoise=1, fitting_parameter=0.18, 
                  guide_star_mag=4, aperture='square', dm='primary'):
         
-        self.parameter_wavlength = 500 # DON'T CHANGE MEEEEEE
+        self.parameter_wavelength = 500 # DON'T CHANGE MEEEEEE
         # Site population
         sites = {'hamilton': {'r0': 10}}            
         if site is not None:
@@ -85,20 +91,22 @@ class Wiggle:
         # AO system parameters
         self.telescope_diameter = telescope_diameter # in meters
         self.science_field = science_field # in arcsec
-        self.number_actuators = number_actuators # actuators
+        self.actuator_spacing = actuator_spacing # actuators
         self.sigma_readnoise = readnoise # in photons/pix
         self.controller_frequency = controller_frequency
-        self.wavelength = science_wavelength # nanometers
+        self.science_wavelength = science_wavelength # nanometers
         self.dm=dm
         self.aperture=aperture
         
-        self.zenith_angle = zenith_angle # specify in radians 
+        self.zenith_angle = zenith_angle  
+        self.isoplanatic_angle = isoplanatic_angle
+        self.science_object_separation = science_object_separation
         self.guide_star_mag = guide_star_mag 
         self._calculate_r0()
-        self._calculate_structure_function()
+        self._calculate_structure_function() # WHO IS SHE??
         self._calculate_greenwood_frequency()
         
-        self._calculate_diffraction_limit()
+        self._calculate_diffraction_limit() # in mas
         self._calculate_actuators_across()
         self._calculate_spatial_frequency_cutoff()
 
@@ -123,77 +131,80 @@ class Wiggle:
 
     def _calculate_structure_function(self):
         """ Calculates the structure function for a given site."""
+        
         self.structure_function = self.cn_squared*(self.r0**(2/3))
 
     def _calculate_diffraction_limit(self):
         """ Calculates diffraction limit. """
-
-        pass
+        
+        # return in mas
+        self.diffraction_limit = 2.063e8 * self.science_wavelength/self.telescope_diameter
     
     def _calculate_actuators_across(self):
         """ Calculates actuators across the diameter. I.e., 'unit actuators'. """
         
-        # spherical mirrors only
-        self.actuator_spacing =(self.telescope_diameter/2)**2*np.pi/self.number_actuators 
         self.unit_actuators = self.telescope_diameter / self.actuator_spacing
 
     def _calculate_spatial_frequency_cutoff(self):
         """ Calculates the highest spatial freq (smallest size) that's controllable. """
-
-        self.spatial_cutoff = ( self.unit_actuators / self.telescope_diameter)/2 
+        
+        # unused 
+        self.spatial_cutoff = (self.unit_actuators / self.telescope_diameter)/2 
 
     def _calculate_r0(self):
         """ Calcualtes r0 at the zenith angle. """
 
-        self.r0 = self.coherence_cell_size * (np.cos(self.zenith_angle))**(3/5)
+        self.r0 = self.coherence_cell_size * (np.cos(np.deg2rad(self.zenith_angle)))**(3/5)
 
     def _calculate_greenwood_frequency(self):
         """ Calculates greendwood frequency for a site/target."""
-
+        
+        # Where does this factor come from (pulled from spreadsheet) #FIXME
         self.greenwood_frequency = 0.426 * (self.mean_wind_speed / self.r0)
    
     def _calculate_fitting_error(self):
         
-        sigma_fitting_squared = self.fitting_parameter * (( (self.actuator_spacing)/(self.r0) )**(5/3)) *  (self.wavelength /(2*np.pi))
-        self.sigma_fitting = np.sqrt(sigma_fitting_squared)
+        sigma_fitting_squared = self.fitting_parameter*(((self.actuator_spacing)/(self.r0))**(5/3))
+        self.sigma_fitting = np.sqrt(sigma_fitting_squared)*(self.parameter_wavelength /(2*np.pi))
 
     def _calculate_measurement_error(self):
         """ Calculates measurement error for the AO system. """    
         
         # Calculate Hartmann Spot
-        arc_seconds_across = 206265*5.89e-7
-        term1, term2 = arc_seconds_across/self.actuator_spacing, arc_seconds_across/self.r0
+        # FIXME what are factor_1, factor_2 ???
+        factor_1, factor_2 = 206265*5.89e-7, 206265*6.5e-7
+        term1, term2 = factor_1/self.actuator_spacing, factor_2/self.r0
         hartmann_spot = np.max([term1, term2])
         
         # Calculate SNR 
-        n_pix=4
+        n_pix=4 # FIXME spreadsheet says not to change this idk why?
         sample_time = 1/(10*self.controller_frequency)
-        n_photons = self.guide_star_mag*sample_time*((100*self.actuator_spacing)**2)
+        brightness = (8.9e5)*10**((0-self.guide_star_mag)/2.5)
+        n_photons = brightness*sample_time*((100*self.actuator_spacing)**2)
         snr = n_photons/np.sqrt(n_photons + n_pix*(self.sigma_readnoise)**2)
-        
+
         # Calculate noise propagator 
-        degrees_of_freedom = np.round( (np.pi/4) * (self.telescope_diameter/self.actuator_spacing) )
-        propagation, factor = 0.0536, 0.0795  # FIXME
+        degrees_of_freedom = np.round((np.pi/4) * (self.telescope_diameter/self.actuator_spacing)**2)
+        factor_1, factor_2 = 0.0536, 0.0795  # FIXME WHAT THE HECK IS THIS
         if self.aperture == 'circular':
-            proagation, factor = 0.0068, 0.0796
-        noise_propagator = np.sqrt(2*(propagation + factor*np.log(degrees_of_freedom)))
-        
+            factor_1, factor_2 = 0.0068, 0.0796
+        noise_propagator = np.sqrt(2*(factor_1 + factor_2*np.log(degrees_of_freedom)))
+
         # Calculate close loop averaging
         controller_over_frame = 1/10
         close_loop_averaging = np.sqrt(2*controller_over_frame)*np.arctan(1/(2*controller_over_frame))
-
-        sigma_measurement = noise_propagator * close_loop_averaging * self.actuator_spacing * (hartmann_spot / snr)
-        self.sigma_measurement = sigma_measurement
+        sigma_measurement = noise_propagator * close_loop_averaging * (self.actuator_spacing*1e9) * (hartmann_spot/snr*4.84814e-6)
+        self.sigma_measurement = sigma_measurement # in nm
 
     def _calculate_anisoplatanism_error(self):
         """ Calculates anisoplatanism error. Not important unless we're using a laser guide star. """
 
-        self.sigma_anisoplatanism = 0
+        self.sigma_anisoplatanism = np.sqrt((self.science_object_separation/self.isoplanatic_angle)**(5/3))*(self.parameter_wavelength /(2*np.pi))
     
     def _calculate_bandwidth_error(self):
         """ Calculates bandwidth error. """
 
-        self.sigma_bandwidth = (self.greenwood_frequency / self.controller_frequency)**(5/3)
+        self.sigma_bandwidth = np.sqrt((self.greenwood_frequency / self.controller_frequency)**(5/3))*(self.parameter_wavelength /(2*np.pi))
 
     def _calculate_high_order_wfe(self):
 
@@ -203,7 +214,7 @@ class Wiggle:
     def _calculate_strehl(self):
         """ Calculates strehl given high order wfe. """
 
-        self.strehl = np.exp( (0 - (2*np.pi / self.wavelength) * self.high_order_wfe)**2)
+        self.strehl = np.exp(-1*((2*np.pi/self.science_wavelength)*self.high_order_wfe)**2)
 
 
     def build_science_detector(self):
