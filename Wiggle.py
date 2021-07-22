@@ -13,7 +13,6 @@ EASTER EGGGGGGGGGS
 
 - coherence cell size vs r0_scalar
 -- this are the same
-- NO LASER GUIDESTARS
 -- NO TIPTILT ERRORS
 -- NO ANISOPLANETISM 
 - NO SHIRT NO SHOES NO LASER GUIDE STARS
@@ -47,8 +46,6 @@ class Wiggle:
         Frequency at which the controller (i.e. AO system) can operate in Hz.
     cn_squared : is rude  
         Vertical turbulence profile. #FIXME
-    science_field : float #FIXME unused
-        Size of science field in arcseconds
     number_actuators : int
         Number of actuators on the adaptive mirror. 
     readnoise : float
@@ -69,7 +66,7 @@ class Wiggle:
     def __init__(self, site=None, telescope_diameter=8, science_wavelength=1000, 
                  coherence_cell_size=0.1, zenith_angle=0, isoplanatic_angle=3.87,
                  science_object_separation=0, mean_wind_speed = 10,
-                 controller_frequency=50, cn_squared=1, science_field=30, 
+                 controller_frequency=50, cn_squared=1, 
                  actuator_spacing=0.3, readnoise=1, fitting_parameter=0.18, 
                  guide_star_mag=4, aperture='square', dm='primary'):
         
@@ -77,58 +74,37 @@ class Wiggle:
         # Site population
         sites = {'hamilton': {'r0': 10}}            
         if site is not None:
-            self.site = site
+            self.site = site if not hasattr(self, 'site') else self.site
             self.coherence_cell_size = sites[site]['coherence_cell_size'] # in meters
             self.mean_wind_speed = sites[site]['mean_wind_speed'] # m/s
             self.cn_squared = sites[site]['cn_squared'] # 
         
 
         # Overwriting/calculating site parameters -- FIXME
-        self.coherence_cell_size = coherence_cell_size
-        self.mean_wind_speed = mean_wind_speed # meters/2
-        self.cn_squared = cn_squared
+        self.coherence_cell_size = coherence_cell_size if not hasattr(self, 'coherence_cell_size') else self.coherence_cell_size
+        self.mean_wind_speed = mean_wind_speed if not hasattr(self, 'mean_wind_speed') else self.mean_wind_speed # meters/2
+        self.cn_squared = cn_squared if not hasattr(self, 'cn_squared') else self.cn_squared
 
         # AO system parameters
-        self.telescope_diameter = telescope_diameter # in meters
-        self.science_field = science_field # in arcsec
-        self.actuator_spacing = actuator_spacing # actuators
-        self.sigma_readnoise = readnoise # in photons/pix
-        self.controller_frequency = controller_frequency
-        self.science_wavelength = science_wavelength # nanometers
-        self.dm=dm
-        self.aperture=aperture
+        self.telescope_diameter = telescope_diameter if not hasattr(self, 'telescope_diameter') else self.telescope_diameter# in meters
+        self.actuator_spacing = actuator_spacing if not hasattr(self, 'actuator_spacing') else self.actuator_spacing # meters
+        self.sigma_readnoise = readnoise if not hasattr(self, 'readnoise') else self.readnoise # in photons/pix
+        self.controller_frequency = controller_frequency if not hasattr(self, 'controller_frequency') else self.controller_frequency 
+        self.science_wavelength = science_wavelength if not hasattr(self, 'science_wavelength') else self.science_wavelength # nanometers
+        self.dm = dm if not hasattr(self, 'dm') else self.dm 
+        self.aperture = aperture if not hasattr(self, 'aperture') else self.aperture 
         
-        self.zenith_angle = zenith_angle  
-        self.isoplanatic_angle = isoplanatic_angle
-        self.science_object_separation = science_object_separation
-        self.guide_star_mag = guide_star_mag 
-        self._calculate_r0()
-        self._calculate_structure_function() # WHO IS SHE??
-        self._calculate_greenwood_frequency()
+        self.zenith_angle = zenith_angle if not hasattr(self, 'zenith_angle') else self.zenith_angle 
+        self.isoplanatic_angle = isoplanatic_angle if not hasattr(self, 'isoplanatic_angle') else self.isoplanatic_angle 
+        self.science_object_separation = science_object_separation if not hasattr(self, 'science_object_separation') else self.science_object_separation
+        self.guide_star_mag = guide_star_mag if not hasattr(self, 'guide_star_mag') else self.guide_star_mag 
         
-        self._calculate_diffraction_limit() # in mas
-        self._calculate_actuators_across()
-        self._calculate_spatial_frequency_cutoff()
-
-        self.fitting_parameter = fitting_parameter
+        self.fitting_parameter = fitting_parameter if not hasattr(self, 'fitting_parameter') else self.fitting_parameter
         
-        self._calculate_fitting_error()
-        self._calculate_measurement_error()
-        self._calculate_anisoplatanism_error()
-        self._calculate_bandwidth_error()
-        self._calculate_high_order_wfe()
-        self._calculate_strehl()
+        self.calculate_ao_error_terms()
+        self.calculate_thickness_terms()
+
         
-        
-        # Detector parameters 
-
-
-        #self.science_camera = 
-        #self.wfs = 
-
-        #self._calculate_influence_functions()
-    
-
     def _calculate_structure_function(self):
         """ Calculates the structure function for a given site."""
         
@@ -216,53 +192,80 @@ class Wiggle:
 
         self.strehl = np.exp(-1*((2*np.pi/self.science_wavelength)*self.high_order_wfe)**2)
 
+    def _calculate_matching_thickness(self):
+        """ Calculates the thickness required to match Keck ASM specs."""
 
-    def build_science_detector(self):
+        asm_spacing = 0.039 # in meters
+        asm_thickness = 3.55e-3 # in meters
 
-        self.science_detector = hcipy.NoiselessDectector()
-        #.... 
+        self.matching_thickness = asm_thickness*(self.actuator_spacing/asm_spacing)**2
+        self.thickness = self.matching_thickness
 
+    def _calculate_driven_mass(self):
+        """ Calculates the mass each actuator needs to drive given a borofloat
+        mirror."""
+
+        borofloat_density = 2230 # in kg/m^3
+        actuator_region = self.actuator_spacing**2 # for square regions
+        self.driven_mass = borofloat_density*self.thickness*actuator_region
+
+    def _calculate_resonant_frequency(self):
+        """ Calculates the resonant frequency for a mirror. """
+    
+        spring_constant =  0.525e6 # in N/m #FIXME
+        self.resonant_frequency = np.sqrt(spring_constant/self.driven_mass)
     
     def _calculate_influence_functions(self):
         if self.dm == 'primary':
             pass
 
+    def calculate_quilting_error(self, resistance, thickness):
+        """ Calculates gravity quilting error."""
+
+        self.quilting_error = ((0.126*self.actuator_spacing**2)**2)/(resistance*thickness**2)
     
-    def calculate_static_performance(self, verbose=False):
+    def calculate_min_thickness(self, resistance, max_quilting_error):
+        """ Calculates the thickness required to limit to a certain quilting error."""
+
+        self.min_thickness = (0.126*self.actuator_spacing**2)/np.sqrt(resistance*max_quilting_error)
+        self.thickness = self.min_thickness
+
+    def calculate_ao_error_terms(self):
+        """ Runs the calculations for AO error terms. """
+
+        self._calculate_r0()
+        self._calculate_structure_function() # WHO IS SHE??
+        self._calculate_greenwood_frequency()
         
-        self.calculate_measurement_error()
+        self._calculate_diffraction_limit() # in mas
+        self._calculate_actuators_across()
+        self._calculate_spatial_frequency_cutoff()
 
+        self._calculate_fitting_error()
+        self._calculate_measurement_error()
+        self._calculate_anisoplatanism_error()
+        self._calculate_bandwidth_error()
+        self._calculate_high_order_wfe()
+        self._calculate_strehl()
+    
+    def calculate_thickness_terms(self):
+        """ Calculates the terms related to facesheet thickness. """
 
-    def build_deformable_mirrr(self):
+        self._calculate_matching_thickness()
+        self._calculate_driven_mass()
+        self._calculate_resonant_frequency()
+    
+    def recalculate(self):
+        """ Recalculates the AO error and thickness terms when we update
+        params."""
 
-        self.deformable_mirror = hicpy.DeformableMirror(self.influence_functions)
+        self.calculate_ao_error_terms()
+        self._calculate_driven_mass()
+        self._calculate_resonant_frequency()
 
-
-    def run_simulation(self, verbose=False):
-
-        # running through time???
-        self.build_science_detector()
-        self.build_wfs()
-        self.build_deformable_mirror()
-        
-        # GO
-        
-    def plot_metrics(self):
-        pass
-
-        # idk plot some things
-
-
-#shane_2_4 = Wiggle(site='hamilton', diameter=2.4)
-#shane.run_simulation()
-
-#actuators vs diameter:
 
 if __name__ == "__main__":
-    test = Wiggle(site=None, telescope_diameter=8, science_field=30,
-        actuator_spacing=0.3, readnoise=.01, controller_frequency=30, 
-        dm='primary', aperture='square', coherence_cell_size = 1,
-        mean_wind_speed = 3, cn_squared = .5, r0_scalar = .02)
+    test = Wiggle()
         
     print(test.strehl)
-
+    print(test.resonant_frequency/test.controller_frequency)
