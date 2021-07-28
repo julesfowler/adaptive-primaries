@@ -3,20 +3,6 @@ import numpy as np
 
 """ This is the Wiggle class. It houses simulations of AO loops
 with adaptive primaries. Go team.
-
-
-EASTER EGGGGGGGGGS
-------------------
-- cn_squared is a vertical turbulence profile
--- we need it to calculate the structure function
--- we don't know how or why quite yet oops
-
-- coherence cell size vs r0_scalar
--- this are the same
--- NO TIPTILT ERRORS
--- NO ANISOPLANETISM 
-- NO SHIRT NO SHOES NO LASER GUIDE STARS
-
 """
 
 
@@ -30,6 +16,8 @@ class Wiggle:
         Diameter of the primary mirror in meters.
     science_wavelength : float
         Wavelength at which we do our ssscience in nanometers.
+    turbulence_wavelength : float
+        Wavelength at which we input our turbulence parameters
     coherence_cell_size : float
         Turbulence pocket scale length -- i.e. r0 NOT dependent 
         on zenith angle in meters.
@@ -44,10 +32,10 @@ class Wiggle:
         Mean speed of the wind in meters/s.
     controller_frequency : float
         Frequency at which the controller (i.e. AO system) can operate in Hz.
-    cn_squared : is rude  
-        Vertical turbulence profile. #FIXME
-    number_actuators : int
-        Number of actuators on the adaptive mirror. 
+    aperture_spacing : float
+        Space between actuators in meters.
+    thickness : float
+        Mirror facesheet thickness in meters.
     readnoise : float
         Readnoise of the wavefront sensor in electrons/pix.
     fitting_parameter : float # FIXME
@@ -63,31 +51,24 @@ class Wiggle:
     """
 
 
-    def __init__(self, site=None, telescope_diameter=8, science_wavelength=1000, 
-                 coherence_cell_size=0.1, zenith_angle=0, isoplanatic_angle=3.87,
-                 science_object_separation=0, mean_wind_speed = 10,
-                 controller_frequency=50, cn_squared=1, 
-                 actuator_spacing=0.3, readnoise=1, fitting_parameter=0.18, 
-                 guide_star_mag=4, aperture='square', dm='primary'):
+    def __init__(self, site=None, telescope_diameter=8, turbulence_wavelength=500, 
+                 science_wavelength=1000, coherence_cell_size=0.1, zenith_angle=0, 
+                 isoplanatic_angle=3.87, science_object_separation=0, mean_wind_speed = 10,
+                 controller_frequency=50, actuator_spacing=0.3, thickness=0.0029,
+                 readnoise=1, fitting_parameter=0.18, guide_star_mag=7, 
+                 aperture='square', dm='primary'):
         
-        self.parameter_wavelength = 500 # DON'T CHANGE MEEEEEE
-        # Site population
-        sites = {'hamilton': {'r0': 10}}            
-        if site is not None:
-            self.site = site if not hasattr(self, 'site') else self.site
-            self.coherence_cell_size = sites[site]['coherence_cell_size'] # in meters
-            self.mean_wind_speed = sites[site]['mean_wind_speed'] # m/s
-            self.cn_squared = sites[site]['cn_squared'] # 
-        
+        # Site population #FIXME future feature to include sites
 
-        # Overwriting/calculating site parameters -- FIXME
+        # Overwriting/calculating site parameters
+        self.parameter_wavelength = turbulence_wavelength if not hasattr(self, 'parameter_wavelength') else self.parameter_wavelength
         self.coherence_cell_size = coherence_cell_size if not hasattr(self, 'coherence_cell_size') else self.coherence_cell_size
         self.mean_wind_speed = mean_wind_speed if not hasattr(self, 'mean_wind_speed') else self.mean_wind_speed # meters/2
-        self.cn_squared = cn_squared if not hasattr(self, 'cn_squared') else self.cn_squared
 
         # AO system parameters
         self.telescope_diameter = telescope_diameter if not hasattr(self, 'telescope_diameter') else self.telescope_diameter# in meters
         self.actuator_spacing = actuator_spacing if not hasattr(self, 'actuator_spacing') else self.actuator_spacing # meters
+        self.thickness = thickness if not hasattr(self, 'thickness') else self.thickness
         self.sigma_readnoise = readnoise if not hasattr(self, 'readnoise') else self.readnoise # in photons/pix
         self.controller_frequency = controller_frequency if not hasattr(self, 'controller_frequency') else self.controller_frequency 
         self.science_wavelength = science_wavelength if not hasattr(self, 'science_wavelength') else self.science_wavelength # nanometers
@@ -101,14 +82,16 @@ class Wiggle:
         
         self.fitting_parameter = fitting_parameter if not hasattr(self, 'fitting_parameter') else self.fitting_parameter
         
-        self.calculate_ao_error_terms()
         self.calculate_thickness_terms()
-
+        self.calculate_ao_error_terms()
+        self.calculate_system_performance()
         
-    def _calculate_structure_function(self):
+    def calculate_structure_function(self, cn_squared_profile):
         """ Calculates the structure function for a given site."""
         
+        self.cn_squared = cn_squared_profile
         self.structure_function = self.cn_squared*(self.r0**(2/3))
+        return structure_function
 
     def _calculate_diffraction_limit(self):
         """ Calculates diffraction limit. """
@@ -185,21 +168,13 @@ class Wiggle:
     def _calculate_high_order_wfe(self):
 
         self.high_order_wfe = np.sqrt( self.sigma_fitting**2 + self.sigma_measurement**2 + 
-                                       self.sigma_anisoplatanism**2 + self.sigma_bandwidth**2 )
+                                       self.sigma_anisoplatanism**2 + self.sigma_bandwidth**2 +
+                                       self.sigma_quilting**2)
 
     def _calculate_strehl(self):
         """ Calculates strehl given high order wfe. """
 
         self.strehl = np.exp(-1*((2*np.pi/self.science_wavelength)*self.high_order_wfe)**2)
-
-    def _calculate_matching_thickness(self):
-        """ Calculates the thickness required to match Keck ASM specs."""
-
-        asm_spacing = 0.039 # in meters
-        asm_thickness = 3.55e-3 # in meters
-
-        self.matching_thickness = asm_thickness*(self.actuator_spacing/asm_spacing)**2
-        self.thickness = self.matching_thickness
 
     def _calculate_driven_mass(self):
         """ Calculates the mass each actuator needs to drive given a borofloat
@@ -209,32 +184,33 @@ class Wiggle:
         actuator_region = self.actuator_spacing**2 # for square regions
         self.driven_mass = borofloat_density*self.thickness*actuator_region
 
-    def _calculate_resonant_frequency(self):
+    def _calculate_resonant_frequency(self, spring_constant=0.525e6, update=True):
         """ Calculates the resonant frequency for a mirror. """
     
-        spring_constant =  0.525e6 # in N/m #FIXME
         self.resonant_frequency = np.sqrt(spring_constant/self.driven_mass)
-    
+        if update:
+            self.controller_frequency = min(self.controller_frequency, self.resonant_frequency/10)
+
     def _calculate_influence_functions(self):
         if self.dm == 'primary':
             pass
 
-    def calculate_quilting_error(self, resistance, thickness):
+    def _calculate_quilting_error(self, resistance=3.24e6):
         """ Calculates gravity quilting error."""
 
-        self.quilting_error = ((0.126*self.actuator_spacing**2)**2)/(resistance*thickness**2)
+        self.sigma_quilting = ((0.126*self.actuator_spacing**2)**2)/(resistance*self.thickness**2)
     
-    def calculate_min_thickness(self, resistance, max_quilting_error):
+    def calculate_min_thickness(self, resistance=3.24e6, max_quilting_error=10e-9, update=True):
         """ Calculates the thickness required to limit to a certain quilting error."""
 
         self.min_thickness = (0.126*self.actuator_spacing**2)/np.sqrt(resistance*max_quilting_error)
-        self.thickness = self.min_thickness
+        if update:
+            self.thickness = self.min_thickness
 
     def calculate_ao_error_terms(self):
         """ Runs the calculations for AO error terms. """
 
         self._calculate_r0()
-        self._calculate_structure_function() # WHO IS SHE??
         self._calculate_greenwood_frequency()
         
         self._calculate_diffraction_limit() # in mas
@@ -245,24 +221,32 @@ class Wiggle:
         self._calculate_measurement_error()
         self._calculate_anisoplatanism_error()
         self._calculate_bandwidth_error()
-        self._calculate_high_order_wfe()
-        self._calculate_strehl()
     
     def calculate_thickness_terms(self):
         """ Calculates the terms related to facesheet thickness. """
 
-        self._calculate_matching_thickness()
+        self.calculate_min_thickness()
         self._calculate_driven_mass()
         self._calculate_resonant_frequency()
+        self._calculate_quilting_error()
     
-    def recalculate(self):
+    def calculate_system_performance(self):
+        """ Calculates the high order WFE and strehl. """
+
+        self._calculate_high_order_wfe()
+        self._calculate_strehl()
+
+    def recalculate(self, thickness=False):
         """ Recalculates the AO error and thickness terms when we update
         params."""
-
+        
+        if thickness:
+            self.calculate_thickness_terms()
+        else:
+            self._calculate_driven_mass()
+            self._calculate_resonant_frequency()
         self.calculate_ao_error_terms()
-        self._calculate_driven_mass()
-        self._calculate_resonant_frequency()
-
+        self.calculate_system_performance()
 
 if __name__ == "__main__":
     test = Wiggle()
